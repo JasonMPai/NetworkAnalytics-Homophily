@@ -1,0 +1,382 @@
+---
+title: "NPA - TicketYoda"
+author: "Jason Pai"
+date: "November 20, 2018"
+output: html_document
+---
+
+Load Libraries and Files
+
+```{R}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+library(igraph)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(xtable)
+library(readr)
+
+# load the adopter files
+love_users <- read.csv("love.csv")
+selfie_users <- read.csv("selfie.csv")
+tbt_users <- read.csv("tbt.csv")
+worldcup_users <- read.csv("worldcup.csv")
+
+all_users <- read.csv("all_users.csv")
+user_network <- read.graph("twitter_graph_complete.txt", format = "ncol", directed = TRUE)
+
+```
+
+User's friends as "out"-degree, then linked users to their friends, get only the users following other users
+
+```{R}
+
+following <- degree(user_network, v = V(user_network), mode = "out")
+all_users$following <- following[as.character(all_users$id)]
+users_subset <- all_users[all_users$following > 0, ]
+
+#doublechecking if we networks were imported/created properly
+class(user_network)
+gorder(user_network)
+gsize(user_network)
+
+g1 <- graph_from_data_frame(users_subset, directed = FALSE, vertices = NULL)
+g1 <- simplify(g1)
+plot(g1, edge.arrow.size=2,vertex.size = 5, vertex.label = NA)
+
+```
+
+Check Treated function
+
+```{R}
+
+ck_treat <- function(user_row, treatment) {
+    v <- as_ids(neighbors(user_network, as.character(user_row["id"]), mode = "out"))
+    did_tweet <- treatment[is.element(as.character(treatment$id), v), ]
+    tt <- user_row["timeStamp"]
+    tasterisk <- median(treatment$timeStamp, na.rm = TRUE)
+    influencers <- did_tweet[!is.na(did_tweet$timeStamp) & did_tweet$timeStamp < tasterisk & tt > tasterisk, ]
+    nrow(influencers) > 0
+}
+
+
+#Using degree out to count links and add them to new column
+following<-degree(user_network, mode = "out")
+all_users$following2 <- following[as.character(all_users$id)]
+```
+
+Check adopted function
+
+```{R}
+
+ck_adopt <- function(user_row, treatment) {
+    did_tweet <- treatment[treatment$id == as.integer(user_row["id"]), ]
+    nrow(did_tweet) > 0
+}
+
+```
+
+Add Treated, Adopted, and Regression - Love
+
+```{R}
+treated <- apply(users_subset, 1, function(x) ck_treat(x, love_users))
+love_users_prop <- data.frame(users_subset, treated)
+
+adopted <- apply(users_subset, 1, function(x) ck_adopt(x, love_users))
+love_users_prop <- data.frame(love_users_prop, adopted)
+love_users_prop$adopted <- as.factor(love_users_prop$adopted)
+
+love_users_prop$treated <- as.factor(love_users_prop$treated)
+fit_love_users <- glm(treated ~ location + followers + friends + ntweets, data = love_users_prop, family <- binomial(link = "logit"))
+
+love_users_scores <- as.data.frame(predict(fit_love_users, love_users_prop, type = "response"))
+love_users_prop = data.frame(love_users_prop, love_users_scores)
+colnames(love_users_prop)[10] <- "score"
+
+```
+
+Add Treated, Adopted, and Regression - Selfie
+
+```{R}
+treated <- apply(users_subset, 1, function(x) ck_treat(x, selfie_users))
+selfie_users_prop = data.frame(users_subset, treated)
+
+adopted <- apply(users_subset, 1, function(x) ck_adopt(x, selfie_users))
+selfie_users_prop <- data.frame(selfie_users_prop, adopted)
+selfie_users_prop$adopted <- as.factor(selfie_users_prop$adopted)
+
+selfie_users_prop$treated <- as.factor(selfie_users_prop$treated)
+fit_selfie_users <- glm(treated ~ location + followers + friends + ntweets, data = selfie_users_prop, family <- binomial(link = "logit"))
+
+selfie_users_scores <- as.data.frame(predict(fit_selfie_users, selfie_users_prop, type = "response"))
+selfie_users_prop <- data.frame(selfie_users_prop, selfie_users_scores)
+colnames(selfie_users_prop)[10] <- "score"
+
+```
+
+Add Treated, Adopted, and Regression - TBT
+
+```{R}
+# prop table for tbt hashtag
+treated <- apply(users_subset, 1, function(x) ck_treat(x, tbt_users))
+tbt_users_prop <- data.frame(users_subset, treated)
+
+adopted <- apply(users_subset, 1, function(x) ck_adopt(x, tbt_users))
+tbt_users_prop <- data.frame(tbt_users_prop, adopted)
+tbt_users_prop$adopted <- as.factor(tbt_users_prop$adopted)
+
+tbt_users_prop$treated <- as.factor(tbt_users_prop$treated)
+fit_tbt_users <- glm(treated ~ location + followers + friends + ntweets, data = tbt_users_prop, family = binomial(link <- "logit"))
+
+tbt_users_scores <- as.data.frame(predict(fit_tbt_users, tbt_users_prop, type = "response"))
+tbt_users_prop <- data.frame(tbt_users_prop, tbt_users_scores)
+colnames(tbt_users_prop)[10] <- "score"
+
+#tablefe <- filter(fit_tbt_users, worldcup_users_prop$treated==FALSE)
+#table(tablefe$adopted)
+```
+
+Add Treated, Adopted, and Regression - Worldcup
+
+```{R}
+# prop table for worldcup hashtag
+treated <- apply(users_subset, 1, function(x) ck_treat(x, worldcup_users))
+worldcup_users_prop <- data.frame(users_subset, treated)
+
+adopted <- apply(users_subset, 1, function(x) ck_adopt(x, worldcup_users))
+worldcup_users_prop <- data.frame(worldcup_users_prop, adopted)
+worldcup_users_prop$adopted <- as.factor(worldcup_users_prop$adopted)
+
+worldcup_users_prop$treated <- as.factor(worldcup_users_prop$treated)
+fit_worldcup_users <- glm(treated ~ location + followers + friends + ntweets, data = worldcup_users_prop, family <- binomial(link = "logit"))
+
+worldcup_users_scores <- as.data.frame(predict(fit_worldcup_users, worldcup_users_prop, type = "response"))
+worldcup_users_prop <- data.frame(worldcup_users_prop, worldcup_users_scores)
+colnames(worldcup_users_prop)[10] <- "score"
+
+#tablefe <- filter(worldcup_users_prop, worldcup_users_prop$treated==FALSE)
+#table(tablefe$adopted)
+
+```
+
+Match Function
+
+```{R}
+
+get_match <- function(treated_score, untreated) {
+    average <- mean(untreated$score)
+    sdev2 <- sd(untreated$score) * 2
+    n <- length(untreated$score)
+    error <- qt(0.975, df = n - 1) * sdev2/sqrt(n)
+    left <- average - error
+    right <- average + error
+    m <- min(abs(untreated$score - treated_score))
+    matched_untreated <- untreated$score[which(abs(untreated$score - treated_score) == m)]
+    matched_untreated_id <- untreated$id[which(abs(untreated$score - treated_score) == m)]
+    
+    if (length(matched_untreated) == 0) {-1} 
+    else {
+        firstmatch <- matched_untreated[1]
+        firstmatchid <- matched_untreated_id[1]
+        # only include matches that are within 2 standard deviations of the mean
+        if (firstmatch > left & m < right) {firstmatchid} 
+        else {-1}
+    }
+}
+
+```
+
+Match untreated function
+
+```{R}
+get_untreated_match_adopted_Mark = function(untreated_id, untreated) {
+    if (untreated_id == -1) {-1} 
+  else {
+        matching_untreated <- untreated[untreated$id == as.integer(untreated_id), ]
+        if (matching_untreated$adopted == TRUE) {1}
+        else {0}
+    }
+}
+
+```
+
+Matched Samples - Love
+
+```{R}
+# love_users Create matched sample for love hashtag
+true_love_users <- love_users_prop[love_users_prop$treated == TRUE, ]
+false_love_users <- love_users_prop[love_users_prop$treated == FALSE, ]
+
+untreated_match <- apply(as.data.frame(true_love_users$score), 1, function(x) get_match(x, false_love_users))
+untreated_match_adopted <- apply(as.data.frame(as.integer(untreated_match)), 
+    1, function(x) get_untreated_match_adopted_Mark(x, false_love_users))
+
+matched_love_users <- data.frame(true_love_users, untreated_match, untreated_match_adopted)
+matched_love_users$untreated_match_adopted <- matched_love_users$untreated_match_adopted > 0
+matched_love_users <- matched_love_users[matched_love_users$untreated_match > -1, ]
+
+#compute ratio
+love_users_treated_adopters <- matched_love_users[matched_love_users$adopted == TRUE, ]
+love_users_non_treated_adopters <- matched_love_users[matched_love_users$untreated_match_adopted == TRUE, ]
+ratio_love_users <- nrow(love_users_treated_adopters)/nrow(love_users_non_treated_adopters)
+
+```
+
+Matched Samples - selfie 
+
+```{R}
+# self Create matched sample for selfie hashtag
+true_selfie_users <- selfie_users_prop[selfie_users_prop$treated == TRUE, ]
+false_selfie_users <- selfie_users_prop[selfie_users_prop$treated == FALSE, ]
+
+untreated_match <- apply(as.data.frame(true_selfie_users$score), 1, function(x) get_match(x, false_selfie_users))
+
+untreated_match_adopted <- apply(as.data.frame(as.integer(untreated_match)), 
+    1, function(x) get_untreated_match_adopted_Mark(x, false_selfie_users))
+
+matched_selfie_users <- data.frame(true_selfie_users, untreated_match, untreated_match_adopted)
+matched_selfie_users$untreated_match_adopted <- matched_selfie_users$untreated_match_adopted > 0
+matched_selfie_users <- matched_selfie_users[matched_selfie_users$untreated_match > -1, ]
+
+#compute ratio
+selfie_users_treated_adopters <- matched_selfie_users[matched_selfie_users$adopted == TRUE, ]
+selfie_users_non_treated_adopters <- matched_selfie_users[matched_selfie_users$untreated_match_adopted == TRUE, ]
+ratio_selfie_users <- nrow(selfie_users_treated_adopters)/nrow(selfie_users_non_treated_adopters)
+```
+
+Matched Samples - TBT
+
+```{R}
+# tbt Create matched sample for tbt hashtag
+true_tbts <- tbt_users_prop[tbt_users_prop$treated == TRUE, ]
+false_tbts <- tbt_users_prop[tbt_users_prop$treated == FALSE, ]
+untreated_match <- apply(as.data.frame(true_tbts$score), 1, function(x) get_match(x, 
+    false_tbts))
+
+untreated_match_adopted <- apply(as.data.frame(as.integer(untreated_match)), 
+    1, function(x) get_untreated_match_adopted_Mark(x, false_tbts))
+
+matched_tbts <- data.frame(true_tbts, untreated_match, untreated_match_adopted)
+matched_tbts$untreated_match_adopted <- matched_tbts$untreated_match_adopted > 0
+matched_tbts <- matched_tbts[matched_tbts$untreated_match > -1, ]
+
+#compute ratio
+tbt_users_treated_adopters <- matched_tbts[matched_tbts$adopted == TRUE, ]
+tbt_users_non_treated_adopters <- matched_tbts[matched_tbts$untreated_match_adopted == TRUE, ]
+ratio_tbts <- nrow(tbt_users_treated_adopters)/nrow(tbt_users_non_treated_adopters)
+
+```
+
+Matched Samples - World Cup 
+
+```{R}
+# worldcup Create matched sample for tbt hashtag
+true_worldcup_users <- worldcup_users_prop[worldcup_users_prop$treated == TRUE, ]
+false_worldcup_users <- worldcup_users_prop[worldcup_users_prop$treated == FALSE, ]
+
+untreated_match <- apply(as.data.frame(true_worldcup_users$score), 1, function(x) get_match(x, 
+    false_worldcup_users))
+
+untreated_match_adopted <- apply(as.data.frame(as.integer(untreated_match)), 
+    1, function(x) get_untreated_match_adopted_Mark(x, false_worldcup_users))
+
+matched_worldcup_users <- data.frame(true_worldcup_users, untreated_match, untreated_match_adopted)
+matched_worldcup_users$untreated_match_adopted <- matched_worldcup_users$untreated_match_adopted > 0
+matched_worldcup_users <- matched_worldcup_users[matched_worldcup_users$untreated_match > -1, ]
+
+#compute ratio
+worldcup_users_treated_adopters <- matched_worldcup_users[matched_worldcup_users$adopted == TRUE, ]
+worldcup_users_non_treated_adopters <- matched_worldcup_users[matched_worldcup_users$untreated_match_adopted == TRUE, ]
+ratio_worldcup_users <- nrow(worldcup_users_treated_adopters)/nrow(worldcup_users_non_treated_adopters)
+```
+
+Random-Untreated Match function
+
+```{R}
+
+get_random_match <- function (treated_id, untreated) {
+  random_id <- sample(1:nrow(untreated),1)
+  untreated[random_id,]$id
+}
+
+```
+
+Random match ratio function
+
+```{R}
+
+compute_random_match_ratio <- function(true_treatment, false_treatment) {
+    random_ratio = numeric()
+    for (i in 1:100) {
+      untreated_random_match <- apply(as.data.frame(true_treatment$id), 1, 
+                                     function(x) get_random_match(x, false_treatment))
+      untreated_match_adopted <- apply(as.data.frame(as.integer(untreated_random_match)), 1, 
+                                    function(x) get_untreated_match_adopted_Mark(x, false_treatment))
+      random_matched_sample <- data.frame(true_treatment,                                    untreated_random_match,untreated_match_adopted)
+      random_matched_sample$untreated_match_adopted <- 
+        random_matched_sample$untreated_match_adopted>0
+      random_treated_adopters <- 
+        random_matched_sample[random_matched_sample$adopted==TRUE,]
+      random_non_treated_adopters <- 
+        random_matched_sample[random_matched_sample$untreated_match_adopted==TRUE,]
+      random_ratio[i] <- nrow(random_treated_adopters)/nrow(random_non_treated_adopters)
+    }
+    mean(random_ratio)    
+}
+
+```
+
+Random Match calculated on four dataset
+
+```{R}
+
+ranmat_love_users <- compute_random_match_ratio(true_selfie_users,false_love_users)
+ranmat_selfie_users <- compute_random_match_ratio(true_selfie_users,false_selfie_users)
+ranmat_tbt_users <- compute_random_match_ratio(true_tbts,false_tbts)
+ranmat_worldcup_users <- compute_random_match_ratio(true_worldcup_users,false_worldcup_users)
+
+``` 
+
+Aggregate Dataset into Dataframe for display
+
+```{R}
+dataset_name <- c("Love", "Selfie", "Tbts", "Worldcup")
+
+match_samples <- c(ratio_love_users, ratio_selfie_users, ratio_tbts, ratio_worldcup_users)
+
+random_matching <- c(ranmat_love_users, ranmat_selfie_users, ranmat_tbt_users, ranmat_worldcup_users)
+
+mlu <- nrow(matched_love_users)
+msu <- nrow(matched_selfie_users)
+mtu <- nrow(matched_tbts)
+mwu <- nrow(matched_worldcup_users)
+matchsample_tot <- c(mlu, msu, mtu, mwu)
+
+df <- data.frame(dataset_name, match_samples, random_matching, matchsample_tot)
+df
+
+b1 <- ggplot(df, aes(x=dataset_name, y=match_samples)) + geom_bar(stat="identity")
+b1
+
+b2 <- ggplot(df, aes(x=dataset_name, y=random_matching)) + geom_bar(stat="identity") + theme(legend.position="top", axis.text=element_text(size = 6))
+b2
+
+```
+
+Methodology: We match the numeric propensity score that was generated with the logistic regression, since we've incorporated information the following to score the variables: location, followers, friends, and ntweets.  We matched each treated person to the untreated person that has the closest propensity score and within two standard deviation of the mean score, to build the most similar with respected to treated.
+
+Observations: The four datasets have 505 observations each, where the data is bifurcated to treated and untreated, as well as adopters and non-adopters. To assess these two figures, let's compare the assessment strategy introduced with match_samples and random_matching.  Our first dataset Love have the lowest amount of matching pair at 199 samples, and the highest with the world cup with 249.  Selfie and TBT both had 218 matched samples.
+
+In match_samples, we matched sample created using the propensity scores, compute the ratio of treated to non-treated adopters:
+r(m) = n(+)/n(???)
+where n+ is the number of treated adopters and n??? is the number of non-treated adopters.  Matched sampling builds on temporal clustering, as the treatment includes having a friends in a given time period.  Matched sampling matches same likelihood of treatment, thus controls for selection bias and confounding factors.  
+
+In randomly matching, the items are paired between treated with non-treated. Compute the ratio of treated to non-treated adopters:
+r(r) = n(+)/n(???)
+This was done 100 times to find the average ratio.  Thus, random matching should be higher than the matched sampling, with the exception of the outlier - worldcup.  We should expect that Worldcup higher random matching in general, but we will need to understand and interrogate the data source further to understand.  The random sampling technique links a untreated to treated sample without structure.  This matching method may easily over-estimate user influence that may be actually treated rather than homophily.
+
+
+
+
